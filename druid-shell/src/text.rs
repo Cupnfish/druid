@@ -143,7 +143,7 @@ pub enum Event {
 /// holds shift and presses the right arrow key five times, we would expect the
 /// word `hello` to be selected, the `anchor` to still be `0`, and the `active`
 /// to now be `5`.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Selection {
     /// The 'anchor' end of the selection.
     ///
@@ -155,18 +155,56 @@ pub struct Selection {
     /// This is the end of the selection that moves while holding shift and
     /// pressing the arrow keys.
     pub active: usize,
+    /// The saved horizontal position, during vertical movement.
+    pub h_pos: Option<f64>,
 }
 
 #[allow(clippy::len_without_is_empty)]
 impl Selection {
-    /// Create a new caret (zero-length selection ) at the provided UTF-8 byte index.
+    /// Create a new `Selection` with the provided `anchor` and `active` positions.
+    ///
+    /// Both positions refer to UTF-8 byte indices in some text.
+    ///
+    /// If your selection is a caret, you can use [`Selection::caret`] instead.
+    pub fn new(anchor: usize, active: usize) -> Selection {
+        Selection {
+            anchor,
+            active,
+            h_pos: None,
+        }
+    }
+
+    /// Create a new caret (zero-length selection) at the provided UTF-8 byte index.
     ///
     /// `index` must be a grapheme cluster boundary.
-    pub fn new_caret(index: usize) -> Selection {
+    pub fn caret(index: usize) -> Selection {
         Selection {
             anchor: index,
             active: index,
+            h_pos: None,
         }
+    }
+
+    /// Construct a new selection from this selection, with the provided h_pos.
+    pub fn with_h_pos(mut self, h_pos: Option<f64>) -> Self {
+        self.h_pos = h_pos;
+        self
+    }
+
+    /// Create a new selection that is guaranteed to be valid for the provided
+    /// text.
+    #[must_use = "constrained constructs a new Selection"]
+    pub fn constrained(mut self, s: &str) -> Self {
+        let s_len = s.len();
+        self.anchor = self.anchor.min(s_len);
+        self.active = self.active.min(s_len);
+        while !s.is_char_boundary(self.anchor) {
+            self.anchor += 1;
+        }
+        while !s.is_char_boundary(self.active) {
+            self.active += 1;
+        }
+        self
     }
 
     /// Return the position of the upstream end of the selection.
@@ -191,7 +229,7 @@ impl Selection {
     ///
     /// This is the range that would be replaced if text were inserted at this
     /// selection.
-    pub fn to_range(&self) -> Range<usize> {
+    pub fn range(&self) -> Range<usize> {
         self.min()..self.max()
     }
 
@@ -414,9 +452,9 @@ pub fn simulate_input<H: WinHandler + ?Sized>(
     match event.key {
         KbKey::Character(c) if !event.mods.ctrl() && !event.mods.meta() && !event.mods.alt() => {
             let selection = input_handler.selection();
-            input_handler.replace_range(selection.to_range(), &c);
+            input_handler.replace_range(selection.range(), &c);
             let new_caret_index = selection.min() + c.len();
-            input_handler.set_selection(Selection::new_caret(new_caret_index));
+            input_handler.set_selection(Selection::caret(new_caret_index));
         }
         KbKey::ArrowLeft => {
             let movement = Movement::Grapheme(Direction::Left);
